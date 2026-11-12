@@ -1,0 +1,13 @@
+cn-law-mcp
+Copyright (c) 2026 Yanquan Dev
+
+MCP 服务结构参考 mazulo/leis-mcp (MIT)
+https://github.com/mazulo/leis-mcp
+
+本仓库没有复制该项目的源代码；参考范围限于 MCP 服务的组织方式。
+
+Law article text is sourced from the National Laws and Regulations Database
+of China (https://flk.npc.gov.cn) and is vendored from the Yanquan project at
+yanquan/backend/services/law_seed.py. The article text is not model-generated,
+rewritten, or paraphrased.
+
