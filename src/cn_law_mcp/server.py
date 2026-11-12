@@ -6,7 +6,13 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
 from . import __version__
-from .service import ArticleResult, ErrorResult, LawService, SearchSuccess
+from .service import (
+    ArticleResult,
+    CiteCheckSuccess,
+    ErrorResult,
+    LawService,
+    SearchSuccess,
+)
 
 SERVER_NAME = "cn-law-mcp"
 SERVER_INSTRUCTIONS = (
@@ -61,6 +67,22 @@ def build_server(service: LawService | None = None) -> MCPServer[Any]:
         ],
     ) -> ArticleResult | ErrorResult:
         return law_service.get_article(law_name, article_no)
+
+    @server.tool(
+        name="cite_check",
+        description=(
+            "抽取一段文字中的中国法条引用，并逐条核对本地 108 条法条白名单。"
+            "适合在模型准备给出法律依据、或用户要求验证法条真伪时调用。"
+            "返回 verified、not_found 或 unverifiable，不要把 unverifiable 当作真实引用。"
+        ),
+    )
+    def cite_check(
+        text: Annotated[
+            str,
+            Field(description="需要核验的完整文字，其中应包含法律名和条款号"),
+        ],
+    ) -> CiteCheckSuccess | ErrorResult:
+        return law_service.cite_check(text)
 
     return server
 

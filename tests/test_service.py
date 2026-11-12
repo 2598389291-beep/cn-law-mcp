@@ -33,3 +33,28 @@ def test_search_validates_top_k_without_raising():
     assert isinstance(result, ErrorResult)
     assert "top_k" in result.error
 
+
+def test_cite_check_separates_verified_not_found_and_unverifiable():
+    text = (
+        "《消费者权益保护法》第25条；消费者权益保护法第999条；"
+        "《刑法》第1条；《民法典》第五百七十七条。"
+    )
+    result = LawService().cite_check(text)
+    assert not isinstance(result, ErrorResult)
+    assert result.citation_count == 4
+    assert result.verified_count == 2
+    assert result.not_found_count == 1
+    assert result.unverifiable_count == 1
+    assert [item.status for item in result.citations] == [
+        "verified",
+        "not_found",
+        "unverifiable",
+        "verified",
+    ]
+
+
+def test_cite_check_without_citations_returns_empty_result():
+    result = LawService().cite_check("这是一段没有法条编号的文字")
+    assert not isinstance(result, ErrorResult)
+    assert result.citation_count == 0
+
