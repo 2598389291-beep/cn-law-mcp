@@ -34,7 +34,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"{len(articles)} 条法条索引加载成功")
         return 0
-    parser.error("MCP 服务尚未接入")
-    return 2
+    from .server import run_stdio
+
+    run_stdio()
+    return 0
+
 
 
