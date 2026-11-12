@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import math
+from threading import Lock
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .corpus import load_articles
-from .index import BM25Index, build_index
-from .models import LawArticle
+from .cache import load_or_build_index
+from .corpus import corpus_digest
+from .embedding import TextEmbedder, build_embedder_from_env
+from .index import BM25Index
+from .models import LawArticle, SearchHit
 from .references import extract_citations, normalize_article_no
 
 MAX_TOP_K = 50
@@ -74,8 +78,20 @@ def normalize_law_name(value: str) -> str:
 
 
 class LawService:
-    def __init__(self, index: BM25Index | None = None) -> None:
-        self.index = index or build_index(load_articles())
+    def __init__(
+        self,
+        index: BM25Index | None = None,
+        embedder: TextEmbedder | None = None,
+    ) -> None:
+        if index is None:
+            self.index = load_or_build_index().index
+            self.corpus_digest = corpus_digest()
+        else:
+            self.index = index
+            self.corpus_digest = corpus_digest()
+        self.embedder = embedder if embedder is not None else build_embedder_from_env()
+        self._embedding_lock = Lock()
+        self._document_embeddings: list[list[float]] | None = None
         self._by_key = {
             (article.law_name, article.article_no): article for article in self.index.articles
         }
@@ -90,13 +106,21 @@ class LawService:
                     f"top_k 必须在 1 到 {MAX_TOP_K} 之间",
                     "请把 top_k 调整为 1 到 50 之间的整数",
                 )
+            retrieval_mode = "字符 n-gram + BM25"
             hits = self.index.search(clean_query, top_k=top_k)
+            if self.embedder is not None:
+                hybrid = self._hybrid_search(clean_query, top_k)
+                if hybrid is None:
+                    retrieval_mode = "字符 n-gram + BM25（向量不可用，已降级）"
+                else:
+                    hits = hybrid
+                    retrieval_mode = "字符 n-gram + BM25 + 向量"
             results = [_article_result(hit.article) for hit in hits]
             return SearchSuccess(
                 query=clean_query,
                 results=results,
                 count=len(results),
-                retrieval_mode="字符 n-gram + BM25",
+                retrieval_mode=retrieval_mode,
             )
         except Exception:
             return _error(
@@ -189,4 +213,70 @@ class LawService:
                 "法条引用核验暂时失败",
                 "请稍后重试；也可以改用 search_law 或 get_article 单独核对",
             )
+
+    def _hybrid_search(self, query: str, top_k: int) -> list[SearchHit] | None:
+        assert self.embedder is not None
+        try:
+            document_embeddings = self._get_document_embeddings()
+            query_embedding = self.embedder.embed([query])[0]
+            vector_scores = [
+                _cosine_similarity(query_embedding, document_embedding)
+                for document_embedding in document_embeddings
+            ]
+            if not any(score > 0 for score in vector_scores):
+                return None
+
+            bm25_hits = self.index.search(query, top_k=len(self.index.articles))
+            bm25_by_id = {hit.article.article_id: hit.score for hit in bm25_hits}
+            max_bm25 = max(bm25_by_id.values(), default=0.0) or 1.0
+            max_vector = max(vector_scores)
+            combined = [
+                (
+                    0.5 * (bm25_by_id[article.article_id] / max_bm25)
+                    + 0.5 * (vector_score / max_vector),
+                    article,
+                )
+                for article, vector_score in zip(
+                    self.index.articles, vector_scores, strict=True
+                )
+            ]
+            combined.sort(
+                key=lambda item: (
+                    -item[0],
+                    item[1].law_name,
+                    item[1].article_no,
+                )
+            )
+            return [
+                SearchHit(article=article, score=score)
+                for score, article in combined[:top_k]
+            ]
+        except Exception:
+            return None
+
+    def _get_document_embeddings(self) -> list[list[float]]:
+        if self._document_embeddings is None:
+            with self._embedding_lock:
+                if self._document_embeddings is None:
+                    assert self.embedder is not None
+                    documents = [
+                        (
+                            f"{article.law_name} {article.article_no} "
+                            f"{' '.join(article.keywords)} {article.text}"
+                        )
+                        for article in self.index.articles
+                    ]
+                    self._document_embeddings = self.embedder.embed(documents)
+        return self._document_embeddings
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if len(left) != len(right):
+        raise ValueError("embedding 维度不一致")
+    numerator = sum(a * b for a, b in zip(left, right, strict=True))
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    if not left_norm or not right_norm:
+        return 0.0
+    return numerator / (left_norm * right_norm)
 

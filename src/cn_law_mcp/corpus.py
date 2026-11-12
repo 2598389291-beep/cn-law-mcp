@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
+from pathlib import Path
+
+import cn_law_mcp.data.law_seed as law_seed_module
 
 from .data.law_seed import LAW_SEED
 from .models import LawArticle
 
 EXPECTED_ARTICLE_COUNT = 108
 EXPECTED_LAW_COUNT = 20
+DATA_FILE = Path(law_seed_module.__file__)
 
 
 class CorpusError(ValueError):
@@ -25,6 +30,10 @@ def load_articles(seed: Iterable[tuple[str, str, str, str]] = LAW_SEED) -> tuple
     )
     _validate_articles(articles)
     return articles
+
+
+def corpus_digest() -> str:
+    return hashlib.sha256(DATA_FILE.read_bytes()).hexdigest()
 
 
 def _validate_articles(articles: tuple[LawArticle, ...]) -> None:

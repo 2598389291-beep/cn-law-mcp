@@ -4,8 +4,7 @@ import argparse
 import sys
 
 from . import __version__
-from .corpus import load_articles
-from .index import build_index
+from .cache import load_or_build_index
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,8 +25,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.selftest:
-        articles = load_articles()
-        index = build_index(articles)
+        index = load_or_build_index().index
+        articles = index.articles
         hits = index.search("网购七天无理由退货是第几条", top_k=1)
         if not hits or hits[0].article.law_name != "消费者权益保护法":
             print("自检失败：未召回《消费者权益保护法》", file=sys.stderr)
